@@ -1,9 +1,19 @@
 var bip66 = require('bip66')
 var bufferutils = require('./bufferutils')
+var ECPair = require('./ecpair')
 var typeforce = require('typeforce')
 var types = require('./types')
-
 var OPS = require('./opcodes')
+var scriptTypes = {
+  P2PKH: 'pubkeyhash',
+  P2PK: 'pubkey',
+  MULTISIG: 'multisig',
+  P2SH: 'scripthash',
+  P2WSH: 'segwitscripthash',
+  P2WPKH: 'segwitpubkeyhash',
+  NULLDATA: 'nulldata',
+  NONSTANDARD: 'nonstandard'
+}
 var REVERSE_OPS = (function () {
   var result = {}
   for (var op in OPS) {
@@ -170,7 +180,8 @@ function isSegWitPubKeyHashOutput (script) {
   var buffer = compile(script)
 
   return buffer.length === 22 &&
-      buffer[0] === OPS.OP_0
+      buffer[0] === OPS.OP_0 &&
+      buffer[1] === 0x14
 }
 
 function isPubKeyInput (script) {
@@ -204,8 +215,8 @@ function isScriptHashInput (script, allowIncomplete) {
   var inputType = classifyInput(scriptSigChunks, allowIncomplete)
   var outputType = classifyOutput(redeemScriptChunks)
 
-  if (outputType === 'segwitpubkeyhash') {
-    return inputType === 'pubkeyhash'
+  if (outputType === scriptTypes.P2WPKH) {
+    return inputType === scriptTypes.P2PKH
   }
 
   return inputType === outputType
@@ -224,7 +235,8 @@ function isSegWitScriptHashOutput (script) {
   var buffer = compile(script)
 
   return buffer.length === 34 &&
-    buffer[0] === OPS.OP_0
+    buffer[0] === OPS.OP_0 &&
+    buffer[1] === 0x20
 }
 
 // allowIncomplete is to account for combining signatures
@@ -243,27 +255,62 @@ function isMultisigInput (script, allowIncomplete) {
   return chunks.slice(1).every(isCanonicalSignature)
 }
 
+function parseMultisigScript (chunks) {
+  typeforce(types.tuple(types.maybe(types.Number), types.maybe(types.Buffer)), chunks)
+  if (chunks.length < 4) {
+    throw new Error('Multsig script is missing elements')
+  }
+
+  if (!types.Number(chunks[0])) {
+    throw new Error('number of signatures must be an opcode')
+  }
+  chunks.slice(1, chunks.length - 2).forEach(function (element) {
+    if (!types.Buffer(element)) {
+      throw new Error('public keys must be an opcode')
+    }
+  })
+  if (!types.Number(chunks[chunks.length - 2])) {
+    throw new Error('number of public keys must be an opcode')
+  }
+  if (chunks[chunks.length - 1] !== OPS.OP_CHECKMULTISIG) {
+    throw new Error('last opcode must be OP_CHECKMULTISIG')
+  }
+
+  var m = chunks[0] - OP_INT_BASE
+  var n = chunks[chunks.length - 2] - OP_INT_BASE
+  if (m < 0) {
+    throw new Error('number of signatures cannot be less than zero')
+  }
+  if (m > n) {
+    throw new Error('number of signatures cannot exceed number of public keys')
+  }
+  if (n > 16) {
+    throw new Error('number of public keys cannot be greater than 16')
+  }
+  if (chunks.length - 3 !== n) {
+    throw new Error('incorrect number of public keys found')
+  }
+  var keys = chunks.slice(1, -2)
+  if (!keys.every(isCanonicalPubKey)) {
+    throw new Error('non-canonical public key found')
+  }
+  return {
+    nRequiredSigs: m,
+    publicKeyBuffers: keys,
+    publicKeys: keys.map(function (vchPubKey) {
+      return ECPair.fromPublicKeyBuffer(vchPubKey)
+    }),
+    nPublicKeys: n
+  }
+}
+
 function isMultisigOutput (script) {
-  var chunks = decompile(script)
-  if (chunks.length < 4) return false
-  if (chunks[chunks.length - 1] !== OPS.OP_CHECKMULTISIG) return false
-
-  var mOp = chunks[0]
-  var nOp = chunks[chunks.length - 2]
-
-  if (!types.Number(mOp)) return false
-  if (!types.Number(nOp)) return false
-
-  var m = mOp - OP_INT_BASE
-  var n = nOp - OP_INT_BASE
-
-  // 0 < m <= n <= 16
-  if (m <= 0) return false
-  if (m > n) return false
-  if (n > 16) return false
-  if (n !== chunks.length - 3) return false
-
-  return chunks.slice(1, -2).every(isCanonicalPubKey)
+  try {
+    parseMultisigScript(script)
+    return true
+  } catch (e) {
+    return false
+  }
 }
 
 function isNullDataOutput (script) {
@@ -275,38 +322,38 @@ function classifyOutput (script) {
   var chunks = decompile(script)
 
   if (isPubKeyHashOutput(chunks)) {
-    return 'pubkeyhash'
+    return scriptTypes.P2PKH
   } else if (isScriptHashOutput(chunks)) {
-    return 'scripthash'
+    return scriptTypes.P2SH
   } else if (isSegWitPubKeyHashOutput(chunks)) {
-    return 'segwitpubkeyhash'
+    return scriptTypes.P2WPKH
   } else if (isSegWitScriptHashOutput(chunks)) {
-    return 'segwitscripthash'
+    return scriptTypes.P2WSH
   } else if (isMultisigOutput(chunks)) {
-    return 'multisig'
+    return scriptTypes.MULTISIG
   } else if (isPubKeyOutput(chunks)) {
-    return 'pubkey'
+    return scriptTypes.P2PK
   } else if (isNullDataOutput(chunks)) {
-    return 'nulldata'
+    return scriptTypes.NULLDATA
   }
 
-  return 'nonstandard'
+  return scriptTypes.NONSTANDARD
 }
 
 function classifyInput (script, allowIncomplete) {
   var chunks = decompile(script)
 
   if (isPubKeyHashInput(chunks)) {
-    return 'pubkeyhash'
+    return scriptTypes.P2PKH
   } else if (isMultisigInput(chunks, allowIncomplete)) {
-    return 'multisig'
+    return scriptTypes.MULTSIG
   } else if (isScriptHashInput(chunks, allowIncomplete)) {
-    return 'scripthash'
+    return scriptTypes.P2SH
   } else if (isPubKeyInput(chunks)) {
-    return 'pubkey'
+    return scriptTypes.P2PK
   }
 
-  return 'nonstandard'
+  return scriptTypes.NONSTANDARD
 }
 
 // Standard Script Templates
@@ -372,7 +419,7 @@ function pubKeyHashInput (signature, pubKey) {
   return compile([signature, pubKey])
 }
 
-// <scriptSig> {serialized scriptPubKey script}
+// <scriptSig> {serialized spkPubKeyHash script}
 function scriptHashInput (scriptSig, scriptPubKey) {
   var scriptSigChunks = decompile(scriptSig)
   var serializedScriptPubKey = compile(scriptPubKey)
@@ -386,16 +433,14 @@ function scriptHashInput (scriptSig, scriptPubKey) {
 // OP_0 [signatures ...]
 function multisigInput (signatures, scriptPubKey) {
   if (scriptPubKey) {
-    var chunks = decompile(scriptPubKey)
-    if (!isMultisigOutput(chunks)) throw new Error('Expected multisig scriptPubKey')
+    try {
+      var multisigData = parseMultisigScript(scriptPubKey)
+    } catch (e) {
+      throw new Error('Expected multisig spkPubKeyHash')
+    }
 
-    var mOp = chunks[0]
-    var nOp = chunks[chunks.length - 2]
-    var m = mOp - OP_INT_BASE
-    var n = nOp - OP_INT_BASE
-
-    if (signatures.length < m) throw new Error('Not enough signatures provided')
-    if (signatures.length > n) throw new Error('Too many signatures provided')
+    if (signatures.length < multisigData.nRequiredSigs) throw new Error('Not enough signatures provided')
+    if (signatures.length > multisigData.nPublicKeys) throw new Error('Too many signatures provided')
   }
 
   return compile([].concat(OPS.OP_0, signatures))
@@ -411,6 +456,7 @@ module.exports = {
   fromASM: fromASM,
   toASM: toASM,
 
+  types: scriptTypes,
   number: require('./script_number'),
 
   isCanonicalPubKey: isCanonicalPubKey,
@@ -427,6 +473,7 @@ module.exports = {
   isMultisigInput: isMultisigInput,
   isMultisigOutput: isMultisigOutput,
   isNullDataOutput: isNullDataOutput,
+  parseMultisigScript: parseMultisigScript,
   classifyOutput: classifyOutput,
   classifyInput: classifyInput,
   pubKeyOutput: pubKeyOutput,
@@ -441,3 +488,4 @@ module.exports = {
   multisigInput: multisigInput,
   nullDataOutput: nullDataOutput
 }
+

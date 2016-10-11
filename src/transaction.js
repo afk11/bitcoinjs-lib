@@ -23,6 +23,8 @@ Transaction.SIGHASH_ALL = 0x01
 Transaction.SIGHASH_NONE = 0x02
 Transaction.SIGHASH_SINGLE = 0x03
 Transaction.SIGHASH_ANYONECANPAY = 0x80
+Transaction.SIG_V0 = 0
+Transaction.SIG_V1 = 1
 
 Transaction.fromBuffer = function (buffer, __noStrict) {
   var offset = 0
@@ -359,7 +361,7 @@ Transaction.prototype.hashForSignatureV1 = function (inIndex, prevOutScript, has
 
     txTmp.outs = txTmp.outs.slice(0, nOut + 1)
 
-    // blank all other outputs (clear scriptPubKey, value === -1)
+    // blank all other outputs (clear spkPubKeyHash, value === -1)
     var stubOut = {
       script: EMPTY_SCRIPT,
       valueBuffer: VALUE_UINT64_MAX

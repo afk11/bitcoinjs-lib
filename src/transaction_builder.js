@@ -11,6 +11,12 @@ var ECPair = require('./ecpair')
 var ECSignature = require('./ecsignature')
 var Transaction = require('./transaction')
 
+// some issues with current scheme
+// 'inverted' reasoning for using redeemScript / witnessScript
+// hashType is stateful for an input, rather than per-signature.
+// pubkey is type for: pubkey, P2SH/pubkey, witness pubkey? why witness pubkey?
+
+
 // re-orders signatures to match pubKeys, fills undefined otherwise
 function fixMSSignatures (transaction, vin, pubKeys, signatures, prevOutScript, hashType, skipPubKey) {
   // maintain a local copy of unmatched signatures
@@ -359,13 +365,12 @@ TransactionBuilder.prototype.buildIncomplete = function () {
   return this.__build(true)
 }
 
-var canBuildTypes = {
-  'multisig': true,
-  'pubkey': true,
-  'pubkeyhash': true,
-  'segwitpubkeyhash': true,
-  'segwitscripthash': true
-}
+var canBuildTypes = {};
+canBuildTypes[bscript.types.MULTISIG] = true;
+canBuildTypes[bscript.types.P2PKH] = true;
+canBuildTypes[bscript.types.P2PK] = true;
+canBuildTypes[bscript.types.P2WSH] = true;
+canBuildTypes[bscript.types.P2WPKH] = true;
 
 TransactionBuilder.prototype.__build = function (allowIncomplete) {
   if (!allowIncomplete) {

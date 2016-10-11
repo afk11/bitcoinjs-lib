@@ -144,7 +144,7 @@ describe('TransactionBuilder', function () {
       assert.strictEqual(txb.inputs[0].prevOutScript, undefined)
     })
 
-    it('accepts a txHash, index [, sequence number and scriptPubKey]', function () {
+    it('accepts a txHash, index [, sequence number and spkPubKeyHash]', function () {
       var vin = txb.addInput(txHash, 1, 54, scripts[1])
       assert.strictEqual(vin, 0)
 
