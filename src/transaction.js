@@ -28,6 +28,7 @@ Transaction.ADVANCED_TRANSACTION_MARKER = 0x00
 Transaction.ADVANCED_TRANSACTION_FLAG = 0x01
 
 var EMPTY_SCRIPT = new Buffer(0)
+var EMPTY_WITNESS = []
 var ZERO = new Buffer('0000000000000000000000000000000000000000000000000000000000000000', 'hex')
 var ONE = new Buffer('0000000000000000000000000000000000000000000000000000000000000001', 'hex')
 var VALUE_UINT64_MAX = new Buffer('ffffffffffffffff', 'hex')
@@ -61,8 +62,17 @@ Transaction.fromBuffer = function (buffer, __noStrict) {
     return vi.number
   }
 
-  function readScript () {
+  function readVarString () {
     return readSlice(readVarInt())
+  }
+
+  function readVector () {
+    var res = []
+    var size = readVarInt()
+    for (var c = 0; c < size; c++) {
+      res.push(readVarString())
+    }
+    return res
   }
 
   var tx = new Transaction()
@@ -83,9 +93,9 @@ Transaction.fromBuffer = function (buffer, __noStrict) {
     tx.ins.push({
       hash: readSlice(32),
       index: readUInt32(),
-      script: readScript(),
+      script: readVarString(),
       sequence: readUInt32(),
-      witness: EMPTY_SCRIPT
+      witness: EMPTY_WITNESS
     })
   }
 
@@ -93,13 +103,13 @@ Transaction.fromBuffer = function (buffer, __noStrict) {
   for (i = 0; i < voutLen; ++i) {
     tx.outs.push({
       value: readUInt64(),
-      script: readScript()
+      script: readVarString()
     })
   }
 
   if (hasWitnesses) {
     for (i = 0; i < vinLen; ++i) {
-      tx.inputs[i].witness = readScript()
+      tx.inputs[i].witness = readVector()
     }
   }
 
@@ -155,7 +165,7 @@ Transaction.prototype._addInput = function (hash, index, sequence, scriptSig, wi
     index: index,
     script: scriptSig || EMPTY_SCRIPT,
     sequence: sequence,
-    witness: witness || EMPTY_SCRIPT
+    witness: witness || EMPTY_WITNESS
   }) - 1)
 }
 
@@ -171,7 +181,7 @@ Transaction.prototype.addOutput = function (scriptPubKey, value) {
 
 Transaction.prototype._hasWitnesses = function () {
   return this.ins.some(function (x) {
-    return x.witness !== EMPTY_SCRIPT
+    return x.witness !== EMPTY_WITNESS
   })
 }
 
@@ -387,6 +397,8 @@ Transaction.prototype.toBuffer = function (buffer, initialOffset) {
   function writeUInt32 (i) { offset = buffer.writeUInt32LE(i, offset) }
   function writeUInt64 (i) { offset = bufferutils.writeUInt64LE(buffer, i, offset) }
   function writeVarInt (i) { offset += bufferutils.writeVarInt(buffer, i, offset) }
+  function writeVarString (i) { writeVarInt(i.length); writeSlice(i) }
+  function writeVector (i) { writeVarInt(i.length); for (var c = 0, l = i.length; c < l; c++) writeVarString(i.length) }
 
   writeUInt32(this.version)
 
@@ -420,8 +432,7 @@ Transaction.prototype.toBuffer = function (buffer, initialOffset) {
 
   if (hasWitnesses) {
     this.ins.forEach(function (input) {
-      writeVarInt(input.witness.length)
-      writeSlice(input.witness)
+      writeVector(input.witness)
     })
   }
 
