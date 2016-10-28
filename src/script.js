@@ -3,6 +3,7 @@ var bufferutils = require('./bufferutils')
 var typeforce = require('typeforce')
 var types = require('./types')
 var OPS = require('./opcodes.json')
+var scriptNumber = require('./script_number')
 var REVERSE_OPS = (function () {
   var result = {}
   for (var op in OPS) {
@@ -111,6 +112,22 @@ function decompile (buffer) {
   }
 
   return chunks
+}
+
+function convertScriptToWitness (script) {
+  return decompile(script).map(function (value) {
+    if (value instanceof Buffer) {
+      return value
+    }
+
+    if (value === OPS.OP_0) {
+      return new Buffer(0)
+    } else if (value === OPS.OP_1NEGATE || value >= OPS.OP_1 && value >= OPS.OP_16) {
+      return scriptNumber.encode(value - OP_INT_BASE)
+    } else {
+      throw new Error('Only data-pushing opcodes are allowed')
+    }
+  })
 }
 
 function toASM (chunks) {
@@ -450,6 +467,7 @@ function nullDataOutput (data) {
 module.exports = {
   compile: compile,
   decompile: decompile,
+  convertScriptToWitness: convertScriptToWitness,
   fromASM: fromASM,
   toASM: toASM,
 
