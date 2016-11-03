@@ -8,6 +8,18 @@ var ECPair = require('./ecpair')
 var ECSignature = require('./ecsignature')
 var Transaction = require('./transaction')
 var EMPTY_SCRIPT = new Buffer(0)
+var SIGNABLE_SCRIPTS = [
+  bscript.types.MULTISIG,
+  bscript.types.P2PKH,
+  bscript.types.P2PK
+];
+var ALLOWED_P2SH_SCRIPTS = [
+  bscript.types.MULTISIG,
+  bscript.types.P2PKH,
+  bscript.types.P2PK,
+  bscript.types.P2WSH,
+  bscript.types.P2WPKH
+];
 
 /**
  * Design goals
@@ -30,12 +42,29 @@ function InSigner (tx, nIn, txOut) {
   this.tx = tx
   this.nIn = nIn
   this.txOut = txOut
-
+  this.canSign = false
   this.publicKeys = []
   this.signatures = []
   this.requiredSigs = null
 
   this.extractScriptSig()
+}
+
+/**
+ * Helper function to produce a script signature
+ *
+ * @param key
+ * @param scriptCode
+ * @param sigHashType
+ * @param sigVersion
+ * @returns Buffer
+ */
+InSigner.prototype.calculateSignature = function (key, scriptCode, sigHashType, sigVersion) {
+  var hash = sigVersion === 1
+    ? this.tx.hashForWitnessV0(this.nIn, scriptCode, this.txOut.value, sigHashType)
+    : this.tx.hashForSignature(this.nIn, scriptCode, sigHashType)
+
+  return key.sign(hash).toScriptSignature(sigHashType)
 }
 
 /**
@@ -92,7 +121,7 @@ var decompileSig = function (scriptSig) {
 }
 
 /**
- * This function is intended only for the BASE_TYPES
+ * This function contains the code for parsing any SIGNABLE_SCRIPTS
  * TODO: remove scriptCode & sigVersion, only required for sorting multisigs
  *
  * @param scriptType - determined scriptType
@@ -142,60 +171,52 @@ InSigner.prototype.extractFromData = function (scriptType, data, scriptCode, sig
  * from any representation of the BASE_TYPES
  */
 InSigner.prototype.extractScriptSig = function () {
-  var scriptType = bscript.classifyOutput(this.txOut.script)
-  var scriptSig = this.tx.ins[this.nIn].script
+  function extractSignable (inSigner, scriptType, chunks, scriptCode, sigVersion) {
+    if (SIGNABLE_SCRIPTS.indexOf(scriptType) !== -1) {
+      inSigner.extractFromData(scriptType, chunks, scriptCode, sigVersion)
+      inSigner.canSign = true
+      return true
+    }
 
-  if ([bscript.types.MULTISIG, bscript.types.P2PK, bscript.types.P2PKH].indexOf(scriptType) !== -1) {
-    this.extractFromData(scriptType, decompileSig(scriptSig), this.txOut.script, Transaction.SIG_V0)
+    return false
   }
 
+  var input = this.tx.ins[this.nIn]
+  var scriptType = bscript.classifyOutput(this.txOut.script)
+  var sigChunks = bscript.convertScriptToWitness(input.script)
+  extractSignable(this, scriptType, sigChunks, this.txOut.script, Transaction.SIG_V0)
+
   if (scriptType === bscript.types.P2SH) {
-    var sigData = decompileSig(scriptSig)
-    if (sigData.length > 0) {
-      this.redeemScript = sigData[sigData.length - 1]
-      scriptType = bscript.classifyOutput(this.redeemScript)
-      this.extractFromData(scriptType, sigData.slice(0, -1), this.redeemScript, Transaction.SIG_V0)
+    if (sigChunks.length > 0) {
+      var rs = sigChunks[sigChunks.length - 1]
+      var rsType = bscript.classifyOutput(rs)
+      if (extractSignable(this, rsType, sigChunks.slice(0, -1), rs, Transaction.SIG_V0)) {
+        scriptType = rsType
+        this.redeemScript = rs
+      }
     }
   }
 
   if (scriptType === bscript.types.P2WPKH) {
     this.requiredSigs = 1
-    if (typeof this.tx.ins[this.nIn].witness !== 'undefined' && this.tx.ins[this.nIn].witness.length === 2) {
-      this.signatures = [this.tx.ins[this.nIn].witness[0]]
-      this.publicKeys = [ECPair.fromPublicKeyBuffer(this.tx.ins[this.nIn].witness[1])]
+    this.canSign = true
+    if (typeof input.witness !== 'undefined' && input.witness.length === 2) {
+      this.signatures = [input.witness[0]]
+      this.publicKeys = [ECPair.fromPublicKeyBuffer(input.witness[1])]
     }
   } else if (scriptType === bscript.types.P2WSH) {
-    if (typeof this.tx.ins[this.nIn].witness !== 'undefined' && this.tx.ins[this.nIn].witness.length === 2) {
-      var vWit = this.tx.ins[this.nIn].witness
+    if (typeof input.witness !== 'undefined' && input.witness.length === 2) {
+      var vWit = input.witness
       if (vWit.length > 0) {
-        this.witnessScript = vWit[vWit.length - 1]
-        var witnessType = bscript.classifyOutput(this.witnessScript)
-        this.extractFromData(witnessType, vWit.slice(0, -1), this.witnessScript, Transaction.SIG_V1)
+        var ws = vWit[vWit.length - 1]
+        var wsType = bscript.classifyOutput(ws)
+        if (extractSignable(this, wsType, vWit.slice(0, -1), ws, Transaction.SIG_V1)) {
+          this.witnessScript = ws
+          scriptType = wsType
+        }
       }
     }
   }
-}
-
-/**
- * Helper function to produce a script signature
- *
- * @param key
- * @param scriptCode
- * @param sigHashType
- * @param sigVersion
- * @returns Buffer
- */
-InSigner.prototype.calculateSignature = function (key, scriptCode, sigHashType, sigVersion) {
-  var hash
-  if (sigVersion === 1) {
-    hash = this.tx.hashForWitnessV0(this.nIn, scriptCode, this.txOut.value, sigHashType)
-  } else {
-    hash = this.tx.hashForSignature(this.nIn, scriptCode, sigHashType)
-  }
-
-  return key
-    .sign(hash)
-    .toScriptSignature(sigHashType)
 }
 
 /**
@@ -226,10 +247,6 @@ InSigner.prototype.solve = function (key, scriptCode, sigHashType, sigVersion) {
   var solvedBy = []
 
   switch (outputType) {
-    case bscript.types.NONSTANDARD:
-    default:
-      return false
-
     // We can only determine the relevant hash from these:
     case bscript.types.P2SH:
       solvedBy.push(decompiled[1])
@@ -241,23 +258,31 @@ InSigner.prototype.solve = function (key, scriptCode, sigHashType, sigVersion) {
     // We can solve signatures for these
     // When adding a new script type, edit here
     case bscript.types.P2PK:
+      this.canSign = true
       solvedBy[0] = decompiled[0]
       if (bufferEquals(key.getPublicKeyBuffer(), decompiled[0])) {
         this.signatures[0] = this.calculateSignature(key, scriptCode, sigHashType, sigVersion)
+        this.publicKeys[0] = key
+      } else {
+        throw new Error('Signing input with wrong private key')
       }
 
       this.requiredSigs = 1
       break
     case bscript.types.P2PKH:
+      this.canSign = true
       solvedBy[0] = decompiled[2]
       if (bufferEquals(crypto.hash160(key.getPublicKeyBuffer()), decompiled[2])) {
         this.signatures[0] = this.calculateSignature(key, scriptCode, sigHashType, sigVersion)
-        this.publicKeys[0] = ECPair.fromPublicKeyBuffer(key.getPublicKeyBuffer())
+        this.publicKeys[0] = key
+      } else {
+        throw new Error('Signing input with wrong private key')
       }
 
       this.requiredSigs = 1
       break
     case bscript.types.MULTISIG:
+      this.canSign = true
       var multisigInfo = bscript.parseMultisigScript(bscript.decompile(scriptCode))
       this.requiredSigs = multisigInfo.nRequiredSigs
       this.publicKeys = multisigInfo.publicKeys
@@ -265,17 +290,23 @@ InSigner.prototype.solve = function (key, scriptCode, sigHashType, sigVersion) {
       var myPublicKey = key.getPublicKeyBuffer()
       var thePublicKey
       var sig
+      var signed = false
 
       for (var i = 0, keyLen = multisigInfo.publicKeyBuffers.length; i < keyLen; i++) {
         thePublicKey = multisigInfo.publicKeyBuffers[i]
         if (bufferEquals(myPublicKey, thePublicKey)) {
+          signed = true
           sig = this.calculateSignature(key, scriptCode, sigHashType, sigVersion)
           this.signatures[i] = sig
         }
       }
 
+      if (!signed) {
+        throw new Error('Signing input with wrong private key')
+      }
       break
     case bscript.types.P2WPKH:
+      this.canSign = true
       solvedBy[0] = decompiled[1]
       this.requiredSigs = 1
       if (bufferEquals(key.getPublicKeyBuffer(), decompiled[1])) {
@@ -322,7 +353,7 @@ InSigner.prototype.sign = function (key, redeemScript, witnessScript, sigHashTyp
     // solution updated, type is the type of the redeemScript
     // Not solved if the solution is not signable, or is P2SH again.
     solution = this.solve(key, redeemScript, sigHashType, Transaction.SIG_V0)
-    solved = solution !== false && bscript.types.P2SH !== solution.type
+    solved = solution !== false && ALLOWED_P2SH_SCRIPTS.indexOf(solution.type) !== -1
     if (solved) {
       this.redeemScript = redeemScript
     }
