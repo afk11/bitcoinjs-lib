@@ -79,6 +79,9 @@ describe('Transaction', function () {
           if (f.id) {
             assert.strictEqual(actual.getId(), f.id)
           }
+          if (f.wtxid) {
+            assert.strictEqual(actual.getWitnessId(), f.wtxid)
+          }
         })
       }
     }
