@@ -309,9 +309,9 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
     txTmp.ins[inIndex].script = ourScript
   }
 
+  var buffer
   // BIP143 sighash activated in BitcoinCash via 0x40 bit
   if (hashType & Transaction.SIGHASH_BITCOINCASHBIP143) {
-    
     if (types.Null(inAmount)) {
       throw new Error('Bitcoin Cash sighash requires value of input to be signed.')
     }
@@ -322,7 +322,7 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
     var inputSequencesBuf = Buffer.allocUnsafe(txTmp.ins.length * 4)
     var inputSequencesBufOffset = 0
     var currentPrevOut = Buffer.allocUnsafe(36)
-    txTmp.ins.forEach(function(input, i) {
+    txTmp.ins.forEach(function (input, i) {
       // gather PrevOut as buffer
       var prevOutBuf = Buffer.allocUnsafe(input.hash.length + 4)
 
@@ -346,7 +346,7 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
     // gather outputs for hashing
     var outputsBufferArray = []
     var outputsBuffersLength = 0
-    txTmp.outs.forEach(function(output) {
+    txTmp.outs.forEach(function (output) {
       var outputBuffer = Buffer.allocUnsafe(output.script.length + 8)
       bufferutils.writeUInt64LE(outputBuffer, output.value, 0)
       output.script.copy(outputBuffer, 8)
@@ -355,7 +355,7 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
     })
     var outputsBuf = Buffer.allocUnsafe(outputsBuffersLength)
     var outputsBufOffset = 0
-    outputsBufferArray.forEach(function(outputBuffer) {
+    outputsBufferArray.forEach(function (outputBuffer) {
       outputBuffer.copy(outputsBuf, outputsBufOffset)
       outputsBufOffset += outputBuffer.length
     })
@@ -367,12 +367,11 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
 
     // get the scriptCode (only part which still has unknown length)
     var thisInputScriptLength = txTmp.ins[inIndex].script.length
-    var scriptCode = Buffer.allocUnsafe(bufferutils.varIntSize(thisInputScriptLength)
-                              + thisInputScriptLength)
+    var scriptCode = Buffer.allocUnsafe(bufferutils.varIntSize(thisInputScriptLength) + thisInputScriptLength)
     bufferutils.varIntBuffer(thisInputScriptLength, scriptCode, 0)
     txTmp.ins[inIndex].script.copy(scriptCode, bufferutils.varIntSize(thisInputScriptLength))
 
-    var buffer = Buffer.allocUnsafe(4 + 32 + 32 + 36 + scriptCode.length + 8 + 4 + 32 + 4 + 4)
+    buffer = Buffer.allocUnsafe(4 + 32 + 32 + 36 + scriptCode.length + 8 + 4 + 32 + 4 + 4)
     var bufOffset = 0
     buffer.writeUInt32LE(txTmp.version, bufOffset)
     bufOffset += 4
@@ -395,7 +394,7 @@ Transaction.prototype.hashForSignature = function (inIndex, prevOutScript, hashT
     buffer.writeUInt32LE(hashType, bufOffset)
   } else { // if not BitcoinCash BIP143
     // serialize and hash
-    var buffer = Buffer.allocUnsafe(txTmp.__byteLength(false) + 4)
+    buffer = Buffer.allocUnsafe(txTmp.__byteLength(false) + 4)
     buffer.writeInt32LE(hashType, buffer.length - 4)
     txTmp.__toBuffer(buffer, 0, false)
   }
