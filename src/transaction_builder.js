@@ -452,7 +452,16 @@ function TransactionBuilder (network, maximumFeeRate) {
   this.maximumFeeRate = maximumFeeRate || 1000
 
   this.inputs = []
+  this.bitcoinCash = false
   this.tx = new Transaction()
+}
+
+TransactionBuilder.prototype.enableBitcoinCash = function (setting) {
+  if (typeof setting === 'undefined') {
+    setting = true
+  }
+
+  this.bitcoinCash = setting
 }
 
 TransactionBuilder.prototype.setLockTime = function (locktime) {
@@ -667,7 +676,7 @@ TransactionBuilder.prototype.sign = function (vin, keyPair, redeemScript, hashTy
   // ready to sign
   var signatureHash
   if (this.bitcoinCash) {
-    signatureHash = this.tx.hashForCashSignature(vin, input.signScript, hashType)
+    signatureHash = this.tx.hashForCashSignature(vin, input.signScript, hashType, witnessValue)
   } else {
     if (input.witness) {
       signatureHash = this.tx.hashForWitnessV0(vin, input.signScript, witnessValue, hashType)
@@ -681,6 +690,10 @@ TransactionBuilder.prototype.sign = function (vin, keyPair, redeemScript, hashTy
     if (input.signatures[i]) throw new Error('Signature already exists')
 
     input.signatures[i] = keyPair.sign(signatureHash).toScriptSignature(hashType)
+
+    console.log("Got signature hash " + signatureHash.toString('hex') + " w hashType " + hashType)
+    console.log(input.signatures[i])
+
     return true
   })
 

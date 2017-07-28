@@ -35,6 +35,7 @@ Transaction.SIGHASH_SINGLE = 0x03
 Transaction.SIGHASH_ANYONECANPAY = 0x80
 Transaction.ADVANCED_TRANSACTION_MARKER = 0x00
 Transaction.ADVANCED_TRANSACTION_FLAG = 0x01
+Transaction.SIGHASH_BITCOINCASHBIP143 = 0x40
 
 var EMPTY_SCRIPT = Buffer.allocUnsafe(0)
 var EMPTY_WITNESS = []
@@ -326,8 +327,10 @@ Transaction.prototype.hashForCashSignature = function (inIndex, prevOutScript, h
     if (types.Null(inAmount)) {
       throw new Error('Bitcoin Cash sighash requires value of input to be signed.')
     }
-    return this.hashForWitnessV0(inIndex, prevOutScript, hashType, inAmount)
+    console.log('bitcoin cash bit')
+    return this.hashForWitnessV0(inIndex, prevOutScript, inAmount, hashType)
   } else {
+    console.log('missing fork id bit')
     return this.hashForSignature(inIndex, prevOutScript, hashType)
   }
 }
@@ -415,6 +418,17 @@ Transaction.prototype.hashForWitnessV0 = function (inIndex, prevOutScript, value
   writeSlice(hashOutputs)
   writeUInt32(this.locktime)
   writeUInt32(hashType)
+  console.log('version: ' + this.version)
+  console.log('hashPrevOuts: ' + hashPrevouts.toString('hex'))
+  console.log('hashSequence: ' + hashSequence.toString('hex'))
+  console.log(input.hash, input.index)
+  console.log('prevOutScript: ' + prevOutScript.toString('hex'))
+  console.log('hashOutputs: ' + hashOutputs.toString('hex'))
+  console.log('amount: ' + value)
+  console.log('sequence: ' + this.ins[inIndex].sequence)
+  console.log('locktime: ' + this.locktime)
+  console.log('hashtype: ' + hashType)
+
   return bcrypto.hash256(tbuffer)
 }
 
