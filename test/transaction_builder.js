@@ -332,8 +332,10 @@ describe('TransactionBuilder', function () {
             assert.throws(function () {
               var txb
               if (f.txHex) {
+                console.log(f.txHex)
                 txb = TransactionBuilder.fromTransaction(Transaction.fromHex(f.txHex))
               } else {
+                console.log(f)
                 txb = construct(f)
               }
 

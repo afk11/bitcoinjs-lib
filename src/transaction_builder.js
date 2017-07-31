@@ -397,7 +397,7 @@ function buildInput (input, allowIncomplete) {
   var sig = []
   var witness = []
   if (SIGNABLE.indexOf(scriptType) !== -1) {
-    sig = buildStack(scriptType, input.signatures, input.pubKeys, input.script, allowIncomplete)
+    sig = buildStack(scriptType, input.signatures, input.pubKeys, allowIncomplete)
   }
 
   var p2sh = false
@@ -620,6 +620,7 @@ TransactionBuilder.prototype.__build = function (allowIncomplete) {
   this.inputs.forEach(function (input, i) {
     var scriptType = input.witnessScriptType || input.redeemScriptType || input.prevOutType
     if (!scriptType && !allowIncomplete) throw new Error('Transaction is not complete')
+
     var result = buildInput(input, allowIncomplete)
 
     // skip if no result
@@ -690,9 +691,6 @@ TransactionBuilder.prototype.sign = function (vin, keyPair, redeemScript, hashTy
     if (input.signatures[i]) throw new Error('Signature already exists')
 
     input.signatures[i] = keyPair.sign(signatureHash).toScriptSignature(hashType)
-
-    console.log("Got signature hash " + signatureHash.toString('hex') + " w hashType " + hashType)
-    console.log(input.signatures[i])
 
     return true
   })
